@@ -1,3 +1,4 @@
+// controllers/reportController.js
 import fs from "fs";
 import path from "path";
 import PDFDocument from "pdfkit";
@@ -5,6 +6,25 @@ import { v4 as uuidv4 } from "uuid";
 
 const ensureDir = (dirPath) => {
   if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
+};
+
+const safeText = (v) => String(v ?? "").trim();
+
+const getBaseUrl = (req) => {
+  // If you set PUBLIC_API_BASE=https://api.gogrocer.ca in AWS .env, it will use that.
+  // Otherwise it falls back to request host.
+  const envBase = safeText(process.env.PUBLIC_API_BASE).replace(/\/+$/, "");
+  if (envBase) return envBase;
+
+  const proto =
+    req.headers["x-forwarded-proto"] ||
+    (req.secure ? "https" : "http");
+
+  const host =
+    req.headers["x-forwarded-host"] ||
+    req.headers.host;
+
+  return `${proto}://${host}`;
 };
 
 export const generateInventoryPdf = async (req, res) => {
@@ -23,28 +43,33 @@ export const generateInventoryPdf = async (req, res) => {
 
     const doc = new PDFDocument({ size: "A4", margin: 40 });
     const out = fs.createWriteStream(filePath);
+
     doc.pipe(out);
 
     // Header
     doc.fontSize(18).text("KitchenK Store-room Inventory", { align: "center" });
     doc.moveDown(0.8);
 
-    if (String(note || "").trim()) {
-      doc.fontSize(12).text(`Note: ${String(note).trim()}`);
+    const noteText = safeText(note);
+    if (noteText) {
+      doc.fontSize(12).fillColor("#111827").text(`Note: ${noteText}`);
       doc.moveDown(0.8);
     }
 
-    // Table-ish layout
-    doc.fontSize(11);
+    // Lines
+    doc.fontSize(11).fillColor("#111827");
     let i = 1;
 
     for (const it of items) {
-      const name = String(it?.name || "").trim();
-      const brand = String(it?.selectedBrand || it?.brand || "").trim();
-      const qty = String(it?.qtyNumber || it?.qty || "").trim();
-      const unit = String(it?.unit || "").trim();
+      const name = safeText(it?.name);
+      const brand = safeText(it?.selectedBrand || it?.brand);
+      const qty = safeText(it?.qtyNumber || it?.qty);
+      const unit = safeText(it?.unit);
 
-      const line = `${i}. ${name}${brand ? ` | ${brand}` : ""}${qty ? ` | ${qty}${unit ? ` ${unit}` : ""}` : ""}`;
+      const line = `${i}. ${name || "-"}` +
+        (brand ? ` | ${brand}` : "") +
+        (qty ? ` | ${qty}${unit ? ` ${unit}` : ""}` : "");
+
       doc.text(line);
       i++;
     }
@@ -54,10 +79,16 @@ export const generateInventoryPdf = async (req, res) => {
     doc.end();
 
     out.on("finish", () => {
-      // ✅ IMPORTANT: return relative download URL (frontend will prefix API_URL)
+      const baseUrl = getBaseUrl(req);
+      const downloadPath = `/api/reports/download/${file}`;
+
       return res.json({
         success: true,
-        downloadUrl: `/api/reports/download/${file}`,
+        // ✅ Always a full URL
+        downloadUrl: `${baseUrl}${downloadPath}`,
+        // optional extra fields
+        file,
+        expires: "one-time",
       });
     });
 
@@ -71,11 +102,15 @@ export const generateInventoryPdf = async (req, res) => {
   }
 };
 
-// ✅ Download once + auto delete after response ends
+// ✅ Download once + auto delete after response ends (delete only once)
 export const downloadAndDeletePdf = (req, res) => {
   try {
-    const file = req.params.file || "";
-    if (!file.endsWith(".pdf")) return res.status(400).send("Invalid file");
+    const file = safeText(req.params.file);
+
+    // basic safety
+    if (!file || !file.endsWith(".pdf") || file.includes("..") || file.includes("/")) {
+      return res.status(400).send("Invalid file");
+    }
 
     const filePath = path.join(process.cwd(), "temp-pdfs", file);
 
@@ -93,13 +128,16 @@ export const downloadAndDeletePdf = (req, res) => {
       return res.status(500).send("Unable to read file");
     });
 
-    // When download finished/connection closed → delete file
-    res.on("finish", () => {
+    let deleted = false;
+    const deleteOnce = () => {
+      if (deleted) return;
+      deleted = true;
       fs.unlink(filePath, (e) => e && console.error("Delete failed:", e.message));
-    });
-    res.on("close", () => {
-      fs.unlink(filePath, (e) => e && console.error("Delete failed:", e.message));
-    });
+    };
+
+    // When response is done or connection closed -> delete file
+    res.on("finish", deleteOnce);
+    res.on("close", deleteOnce);
 
     stream.pipe(res);
   } catch (err) {
