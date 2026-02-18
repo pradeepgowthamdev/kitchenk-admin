@@ -12,6 +12,7 @@ import reportRouter from "./routes/reportRoute.js";
 dotenv.config();
 const app = express();
 
+
 const allowedOrigins = [
   "https://gogrocer.ca",
   "https://www.gogrocer.ca",
@@ -34,7 +35,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // ✅ handle ALL preflight (this avoids the "*" path-to-regexp problem)
-app.options(/.*/, cors(corsOptions));
+app.options("*", cors());
 
 app.use(express.json({ limit: "2mb" }));
 
