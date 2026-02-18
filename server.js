@@ -35,7 +35,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // ✅ handle ALL preflight (this avoids the "*" path-to-regexp problem)
-app.options("*", cors());
+app.options(/.*/, cors());
 
 app.use(express.json({ limit: "2mb" }));
 
