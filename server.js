@@ -13,22 +13,33 @@ dotenv.config();
 const app = express();
 
 /**
- * ✅ CORS
- * Allow production frontend + local dev.
+ * ✅ CORS (Frontend Hostinger + Local dev)
  */
+const allowedOrigins = [
+  "https://gogrocer.ca",
+  "https://www.gogrocer.ca",
+  "http://localhost:5173",
+  "http://localhost:3000",
+];
+
 app.use(
   cors({
-    origin: [
-      "https://gogrocer.ca",
-      "https://www.gogrocer.ca",
-      "http://localhost:5173",
-      "http://localhost:3000",
-    ],
+    origin: (origin, cb) => {
+      // allow server-to-server / curl / postman (no origin)
+      if (!origin) return cb(null, true);
+
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+
+      return cb(new Error(`CORS blocked for origin: ${origin}`));
+    },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: false,
+    credentials: false, // keep false since you're using Bearer token
   })
 );
+
+// ✅ IMPORTANT: reply to all preflight requests
+app.options("*", cors());
 
 app.use(express.json({ limit: "2mb" }));
 
@@ -39,8 +50,6 @@ app.use("/send-email", emailRouter);
 app.use("/api/inventory", inventoryRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/whatsapp", whatsappRouter);
-
-// ✅ NEW: PDF report routes
 app.use("/api/reports", reportRouter);
 
 /**
@@ -49,6 +58,9 @@ app.use("/api/reports", reportRouter);
 app.get("/", (req, res) => res.send("API working"));
 app.get("/health", (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
+/**
+ * ✅ Server start
+ */
 const PORT = process.env.PORT || 5001;
 
 async function start() {
@@ -58,7 +70,9 @@ async function start() {
     await mongoose.connect(process.env.MONGO_URI);
     console.log("✅ MongoDB connected");
 
-    app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`✅ Server running on http://0.0.0.0:${PORT}`);
+    });
   } catch (err) {
     console.error("❌ Server start failed:", err.message);
     process.exit(1);
