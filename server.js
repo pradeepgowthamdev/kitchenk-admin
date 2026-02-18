@@ -12,9 +12,6 @@ import reportRouter from "./routes/reportRoute.js";
 dotenv.config();
 const app = express();
 
-/**
- * ✅ CORS (Frontend Hostinger + Local dev)
- */
 const allowedOrigins = [
   "https://gogrocer.ca",
   "https://www.gogrocer.ca",
@@ -22,61 +19,41 @@ const allowedOrigins = [
   "http://localhost:3000",
 ];
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      // allow server-to-server / curl / postman (no origin)
-      if (!origin) return cb(null, true);
+const corsOptions = {
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // curl/postman
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: false,
+};
 
-      if (allowedOrigins.includes(origin)) return cb(null, true);
+// CORS first
+app.use(cors(corsOptions));
 
-      return cb(new Error(`CORS blocked for origin: ${origin}`));
-    },
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: false, // keep false since you're using Bearer token
-  })
-);
-
-// ✅ IMPORTANT: reply to all preflight requests
-app.options("/*", cors());
+// ✅ handle ALL preflight (this avoids the "*" path-to-regexp problem)
+app.options(/.*/, cors(corsOptions));
 
 app.use(express.json({ limit: "2mb" }));
 
-/**
- * ✅ Routes
- */
 app.use("/send-email", emailRouter);
 app.use("/api/inventory", inventoryRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/whatsapp", whatsappRouter);
 app.use("/api/reports", reportRouter);
 
-/**
- * ✅ Health checks
- */
-app.get("/", (req, res) => res.send("API working"));
-app.get("/health", (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+app.get("/health", (req, res) =>
+  res.json({ ok: true, time: new Date().toISOString() })
+);
 
-/**
- * ✅ Server start
- */
 const PORT = process.env.PORT || 5001;
 
 async function start() {
-  try {
-    if (!process.env.MONGO_URI) throw new Error("MONGO_URI missing in .env");
-
-    await mongoose.connect(process.env.MONGO_URI);
-    console.log("✅ MongoDB connected");
-
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`✅ Server running on http://0.0.0.0:${PORT}`);
-    });
-  } catch (err) {
-    console.error("❌ Server start failed:", err.message);
-    process.exit(1);
-  }
+  await mongoose.connect(process.env.MONGO_URI);
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`✅ Server running on http://0.0.0.0:${PORT}`);
+  });
 }
-
 start();
