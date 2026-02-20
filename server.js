@@ -12,7 +12,6 @@ import reportRouter from "./routes/reportRoute.js";
 dotenv.config();
 const app = express();
 
-
 const allowedOrigins = [
   "https://gogrocer.ca",
   "https://www.gogrocer.ca",
@@ -33,28 +32,37 @@ const corsOptions = {
 
 // CORS first
 app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 
-// ✅ handle ALL preflight (this avoids the "*" path-to-regexp problem)
-app.options(/.*/, cors());
+// JSON (keep only once)
+app.use(express.json({ limit: "10mb" }));
 
-app.use(express.json({ limit: "2mb" }));
-
-app.use("/send-email", emailRouter);
+// Routes
 app.use("/api/inventory", inventoryRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/whatsapp", whatsappRouter);
 app.use("/api/reports", reportRouter);
+app.use("/send-email", emailRouter);
 
-app.get("/health", (req, res) =>
-  res.json({ ok: true, time: new Date().toISOString() })
-);
+// Health
+app.get("/", (req, res) => res.send("API working"));
+app.get("/health", (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
 const PORT = process.env.PORT || 5001;
 
 async function start() {
-  await mongoose.connect(process.env.MONGO_URI);
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`✅ Server running on http://0.0.0.0:${PORT}`);
-  });
+  try {
+    if (!process.env.MONGO_URI) throw new Error("MONGO_URI missing in .env");
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log("✅ MongoDB connected");
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`✅ Server running on http://0.0.0.0:${PORT}`);
+    });
+  } catch (err) {
+    console.error("❌ Server start failed:", err.message);
+    process.exit(1);
+  }
 }
+
 start();
